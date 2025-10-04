@@ -722,6 +722,34 @@ def softmax_loss(x, y):
     ###########################################################################
     # TODO: Copy over your solution from A1.
     ###########################################################################
+    # 获取维度
+    num_train = x.shape[0]
+
+    # 1. 前向传播：计算损失
+    # 数值稳定性：每个样本的分数减去其最大值
+    shifted_scores = x - np.max(x, axis=1, keepdims=True)
+
+    # 计算指数
+    exp_scores = np.exp(shifted_scores)
+
+    # 计算概率
+    probs = exp_scores / np.sum(exp_scores, axis=1, keepdims=True)
+
+    # 提取正确类别的概率并计算负对数损失
+    correct_log_probs = -np.log(probs[range(num_train), y])
+
+    # 计算平均损失
+    loss = np.sum(correct_log_probs) / num_train
+
+    # 2. 反向传播：计算梯度
+    # 初始化梯度矩阵
+    dx = probs.copy()
+
+    # 对于每个样本的正确类别，梯度是 p_i - 1
+    dx[range(num_train), y] -= 1
+
+    # 对整个批次的梯度求平均
+    dx /= num_train
 
     ###########################################################################
     #                             END OF YOUR CODE                            #
