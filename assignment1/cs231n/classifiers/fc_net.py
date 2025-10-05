@@ -232,6 +232,27 @@ class FullyConnectedNet(object):
         # beta2, etc. Scale parameters should be initialized to ones and shift     #
         # parameters should be initialized to zeros.                               #
         ############################################################################
+        layers_dims = [input_dim] + hidden_dims + [num_classes]
+
+        for i in range(1, self.num_layers + 1):
+            W_name = "W" + str(i)
+            b_name = "b" + str(i)
+
+            previous_dim = layers_dims[i - 1]
+            current_dim = layers_dims[i]
+
+            Wi = weight_scale * np.random.randn(previous_dim, current_dim)
+            bi = np.zeros(current_dim)
+
+            self.params[W_name] = Wi
+            self.params[b_name] = bi
+
+            if self.normalization is not None and i < self.num_layers:
+                gamma_name = "gamma" + str(i)
+                beta_name = "beta" + str(i)
+
+                self.params[gamma_name] = np.ones(current_dim)
+                self.params[beta_name] = np.zeros(current_dim)
 
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -302,7 +323,65 @@ class FullyConnectedNet(object):
         # self.bn_params[1] to the forward pass for the second batch normalization #
         # layer, etc.                                                              #
         ############################################################################
+        caches = []
+        current_input = X
 
+        # 循环L - 1个隐藏层
+        for i in range(1, self.num_layers):
+            Wi = self.params[f"W{i}"]
+            bi = self.params[f"b{i}"]
+
+            # 1. affine层
+            out_affine, fc_cache = affine_forward(current_input, Wi, bi)
+
+            # 2.normalization层
+            out_norm = out_affine
+            bn_cache = None
+            if self.normalization == "batchnorm":
+                gamma = self.params[f"gamma{i}"]
+                beta = self.params[f"beta{i}"]
+
+                bn_param = self.bn_params[i - 1]
+                out_norm, bn_cache = batchnorm_forward(out_affine, gamma, beta, bn_param)
+            elif self.normalization == "layernorm":
+                gamma = self.params[f"gamma{i}"]
+                beta = self.params[f"beta{i}"]
+
+                ln_param = {}
+                out_norm, bn_cache = layernorm_forward(out_affine, gamma, beta, ln_param)
+            
+            # 3. ReLU层
+            out_relu, relu_cache = relu_forward(out_norm)
+
+            # 4. Dropout层
+            out_dropout = out_relu
+            dropout_cache = None
+            if self.use_dropout:
+                out_dropout, dropout_cache = dropout_forward(out_relu, self.dropout_param)
+            
+            cache = {
+                "fc":       fc_cache,
+                "bn":       bn_cache,
+                "relu":     relu_cache,
+                "dropout":  dropout_cache
+            }
+
+            caches.append(cache)
+
+            current_input = out_dropout
+
+        # 处理最后一层
+        W_last = self.params[f"W{self.num_layers}"]
+        b_last = self.params[f"b{self.num_layers}"]
+        scores, last_cache = affine_forward(current_input, W_last, b_last)
+        # 最后一个affine的cache要存入caches
+        cache = {
+            "fc":       last_cache,
+            "bn":       None,
+            "relu":     None,
+            "dropout":  None
+        }
+        caches.append(cache)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -325,6 +404,45 @@ class FullyConnectedNet(object):
         # automated tests, make sure that your L2 regularization includes a factor #
         # of 0.5 to simplify the expression for the gradient.                      #
         ############################################################################
+        # 1. 计算loss
+        loss, dscore = softmax_loss(scores, y)
+
+        # L2正则化Loss
+        reg_loss = 0.0
+        for i in range(1, self.num_layers + 1):
+            W = self.params[f"W{i}"]
+            reg_loss += 0.5 * self.reg * np.sum(W * W)
+        loss += reg_loss
+
+        # 2. 反向传播
+        # 最后一层只有affine层所以只需要affine_backward
+        last_cache = caches[self.num_layers - 1]["fc"]
+        upstream_grad, grads[f"W{self.num_layers}"], grads[f"b{self.num_layers}"] = affine_backward(dscore, last_cache)
+
+        grads[f"W{self.num_layers}"] += self.reg * self.params[f"W{self.num_layers}"]
+
+        # 3. 循环向前依次反向传播
+        # 对于每一层都是，affine - normalization - relu - dropout
+        # 所以反响传播时候需要：依次处理dropout - relu - normalization - affine
+        for i in reversed(range(1, self.num_layers)):
+            cache = caches[i - 1]
+
+            # 第一步，处理dropout的反向传播传播
+            if self.use_dropout:
+                upstream_grad = dropout_backward(upstream_grad, cache["dropout"])
+            
+            # 第二步，处理ReLU的反响传播
+            upstream_grad = relu_backward(upstream_grad, cache["relu"])
+
+            # 第三步，处理normalization的反向传播
+            if self.normalization == "batchnorm":
+                upstream_grad, grads[f"gamma{i}"], grads[f"beta{i}"] = batchnorm_backward(upstream_grad, cache["bn"])
+            elif self.normalization == "layernorm":
+                upstream_grad, grads[f"gamma{i}"], grads[f"beta{i}"] = layernorm_backward(upstream_grad, cache["bn"])
+            
+            # 第四步，处理affine的反向传播
+            upstream_grad, grads[f"W{i}"], grads[f"b{i}"] = affine_backward(upstream_grad, cache["fc"])
+            grads[f"W{i}"] += self.reg * self.params[f"W{i}"]
 
         ############################################################################
         #                             END OF YOUR CODE                             #
