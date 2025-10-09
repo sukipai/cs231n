@@ -61,7 +61,40 @@ class ThreeLayerConvNet(object):
         # **the width and height of the input are preserved**. Take a look at      #
         # the start of the loss() function to see how that happens.                #
         ############################################################################
-        # 
+        # 通过loss函数可以看到，conv层的stride = 1， pad = (filter_size - 1) // 2
+        # 池化层的stride = 2, pool_size = 2
+        conv_pad = (filter_size - 1) // 2
+        conv_stride = 1
+        conv_out_dim = (input_dim[1] - filter_size + 2 * conv_pad) // conv_stride + 1
+        
+        max_pool_stride = 2
+        max_pool_size = 2
+        max_pool_out_dim = (conv_out_dim - max_pool_size) // max_pool_stride + 1
+
+        # W1为卷积核，大小是num_filters * input_dim[0] * filter_size * filter_size
+        # b1为偏置，大小是num_filters
+        W1 = weight_scale * np.random.randn(num_filters, input_dim[0], filter_size, filter_size)
+        b1 = np.zeros(num_filters)
+
+        # 经过卷积后，输出的大小是num_filters * conv_out_dim * conv_out_dim
+        # 经过池化后输出的大小是num_filters * max_pool_out_dim * max_pool_out_dim
+        # W2为全连接层，池化输出后的大小通过reshaped后应该是(N, num_filters * max_pool_out_dim * max_pool_out_dim)
+        # 所以W2的大小应该是(num_filters * max_pool_out_dim * max_pool_out_dim, hidden_dim)
+        # b2为偏置，大小是hidden_dim
+        W2 = weight_scale * np.random.randn(num_filters * max_pool_out_dim * max_pool_out_dim, hidden_dim)
+        b2 = np.zeros(hidden_dim)
+
+        # W3之后要出分数，所以大小是hidden_dim * num_classes
+        # b3为偏置，大小是num_classes
+        W3 = weight_scale * np.random.randn(hidden_dim, num_classes)
+        b3 = np.zeros(num_classes)
+
+        self.params["W1"] = W1
+        self.params["b1"] = b1
+        self.params["W2"] = W2
+        self.params["b2"] = b2
+        self.params["W3"] = W3
+        self.params["b3"] = b3
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -96,7 +129,14 @@ class ThreeLayerConvNet(object):
         # Remember you can use the functions defined in cs231n/fast_layers.py and  #
         # cs231n/layer_utils.py in your implementation (already imported).         #
         ############################################################################
-        # 
+        # 1. conv-relu-pool层
+        conv_out, conv_cache = conv_relu_pool_forward(X, W1, b1, conv_param, pool_param)
+
+        # 2. affine-relu层
+        affine_out, affine_relu_cache = affine_relu_forward(conv_out, W2, b2)
+
+        # 3. affine层
+        scores, affine_cache = affine_forward(affine_out, W3, b3)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -115,7 +155,32 @@ class ThreeLayerConvNet(object):
         # automated tests, make sure that your L2 regularization includes a factor #
         # of 0.5 to simplify the expression for the gradient.                      #
         ############################################################################
-        # 
+        # 1. softmax层
+        loss, dScores = softmax_loss(scores, y)
+        reg_loss = 0.5 * self.reg * (np.sum(W1 * W1) + np.sum(W2 * W2) + np.sum(W3 * W3))
+        loss += reg_loss
+        scores = scores.astype(self.dtype)
+
+        # 2. affine的反向传播
+        dout, dW3, db3 = affine_backward(dScores, affine_cache)
+
+        # 3. affine-relu的反向传播
+        dout, dW2, db2 = affine_relu_backward(dout, affine_relu_cache)
+
+        # 4. conv-relu-pool的反向传播
+        dout, dW1, db1 = conv_relu_pool_backward(dout, conv_cache)
+
+        # 5. 添加L2正则化
+        dW3 += self.reg * W3
+        dW2 += self.reg * W2
+        dW1 += self.reg * W1
+
+        grads["W1"] = dW1
+        grads["b1"] = db1
+        grads["W2"] = dW2
+        grads["b2"] = db2
+        grads["W3"] = dW3
+        grads["b3"] = db3
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
