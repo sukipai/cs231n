@@ -138,7 +138,16 @@ class CaptioningRNN:
         #                                                                          #
         # You also don't have to implement the backward pass.                      #
         ############################################################################
-        # 
+        h0 = affine_forward(features, W_proj, b_proj)
+
+        input_embed = word_embedding_forward(captions_in, W_embed)
+
+        if self.cell_type == "rnn":
+            h = rnn_forward(input_embed, h0, Wx, Wh, b)
+
+        scores = temporal_affine_forward(h, W_vocab, b_vocab)
+
+        loss = temporal_softmax_loss(scores, captions_out, mask)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -202,7 +211,24 @@ class CaptioningRNN:
         # NOTE: we are still working over minibatches in this function. Also if   #
         # you are using an LSTM, initialize the first cell state to zeros.        #
         ###########################################################################
-        # 
+        prev_h = affine_forward(features, W_proj, b_proj)
+        start = torch.full((N,), self._start, dtype=torch.long, device=features.device)
+
+        x = W_embed[start]
+
+        captions_list = []
+        for i in range(max_length):
+            h = rnn_step_forward(x, prev_h, Wx, Wh, b)
+            prev_h = h
+
+            scores = h @ W_vocab + b_vocab
+
+            next_word = scores.argmax(dim=1)
+            x = W_embed[next_word]
+
+            captions_list.append(next_word)
+        
+        captions = torch.stack(captions_list, dim=1)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################

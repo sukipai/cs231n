@@ -43,7 +43,7 @@ def rnn_step_forward(x, prev_h, Wx, Wh, b):
     ##############################################################################
     # TODO: Implement a single forward step for the vanilla RNN.                 #
     ##############################################################################
-    # 
+    next_h = torch.tanh(x @ Wx + prev_h @ Wh + b)
     ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
@@ -73,8 +73,29 @@ def rnn_forward(x, h0, Wx, Wh, b):
     # input data. You should use the rnn_step_forward function that you defined  #
     # above. You can use a for loop to help compute the forward pass.            #
     ##############################################################################
-    # 
-    ##############################################################################
+    N, T, D = x.shape
+    H = h0.shape[1]
+    
+    x = x.permute(1, 0, 2)
+    
+    # 创建一个空的 list 来存储每个时间步的 hidden state
+    h_list = []
+    
+    # 初始化 prev_h 为初始隐藏状态 h0
+    prev_h = h0
+    
+    for t in range(T):
+        # 使用上一个隐藏状态 prev_h 和当前输入 x[t] 来计算下一个隐藏状态
+        next_h = rnn_step_forward(x[t], prev_h, Wx, Wh, b)
+        
+        h_list.append(next_h)
+        
+        prev_h = next_h
+        
+    h = torch.stack(h_list)
+    
+    h = h.permute(1, 0, 2)
+        ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
     return h
@@ -101,7 +122,8 @@ def word_embedding_forward(x, W):
     #                                                                            #
     # HINT: This can be done in one line using Pytorch's array indexing.         #
     ##############################################################################
-    # 
+    out = W[x]
+
     ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
