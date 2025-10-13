@@ -36,7 +36,11 @@ class PositionalEncoding(nn.Module):
         # this is what the autograder is expecting. For reference, our solution is #
         # less than 5 lines of code.                                               #
         ############################################################################
-
+        position = torch.arange(0, max_len).unsqueeze(1) # (max_len, ) -> (max_len, 1)
+        div_term = torch.arange(0, embed_dim, 2)
+        pe[0, :, 0::2] = torch.sin(position * torch.pow(10000.0, -div_term / embed_dim))
+        pe[0, :, 1::2] = torch.cos(position * torch.pow(10000.0, -div_term / embed_dim))
+        
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -64,7 +68,8 @@ class PositionalEncoding(nn.Module):
         # appropriate ones to the input sequence. Don't forget to apply dropout    #
         # afterward. This should only take a few lines of code.                    #
         ############################################################################
-
+        x = x + self.pe[0, : x.size(1), :]
+        output = self.dropout(x)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -138,7 +143,7 @@ class MultiHeadAttention(nn.Module):
           and query.
         """
         N, S, E = query.shape
-        N, T, E = value.shape
+        _, T, _ = value.shape
         # Create a placeholder, to be overwritten by your code below.
         output = torch.empty((N, S, E))
         ############################################################################
@@ -155,7 +160,34 @@ class MultiHeadAttention(nn.Module):
         #     prevent a value from influencing output. Specifically, the PyTorch   #
         #     function masked_fill may come in handy.                              #
         ############################################################################
+        H = self.n_head
+        D = self.head_dim
 
+        # 1. Linear projections
+        Q = self.query(query).view(N, S, H, D).transpose(1, 2)  # (N, H, S, D)
+        K = self.key(key).view(N, T, H, D).transpose(1, 2)      # (N, H, T, D)
+        V = self.value(value).view(N, T, H, D).transpose(1, 2)  # (N, H, T, D)
+
+        # 2) Attention scores
+        attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(D) # (N, H, S, T)
+        
+        # 3) Apply mask (optional)
+        if attn_mask is not None:
+            attn_scores = attn_scores.masked_fill(attn_mask == 0, float('-inf'))
+
+        # 4) Attention coefficient/weights
+        attn_weights = F.softmax(attn_scores, dim = -1)
+        attn_weights = self.attn_drop(attn_weights)
+
+        # 5) Attention valueS
+        attn_values = torch.matmul(attn_weights, V) # (N, H, S, D)
+        attn_values = attn_values.transpose(1, 2) # (N, S, H, D)
+        attn_output = attn_values.contiguous().view(N, S, E) # (N, S, E)
+
+        # 6) Final projection
+        output = self.proj(attn_output)    
+
+        # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -252,7 +284,17 @@ class TransformerDecoderLayer(nn.Module):
         # memory, and (2) the feedforward block. Each block should follow the      #
         # same structure as self-attention implemented just above.                 #
         ############################################################################
+        shortcut = tgt
+        tgt = self.cross_attn(query=tgt, key=memory, value=memory)
+        tgt = self.dropout_cross(tgt)
+        tgt = tgt + shortcut
+        tgt = self.norm_cross(tgt)
 
+        shortcut = tgt
+        tgt = self.ffn(tgt)
+        tgt = self.dropout_ffn(tgt)
+        tgt = tgt + shortcut
+        tgt = self.norm_ffn(tgt)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -311,7 +353,10 @@ class PatchEmbedding(nn.Module):
         # step. Once the patches are flattened, embed them into latent vectors     #
         # using the projection layer.                                              #
         ############################################################################
+        image_divided = x.reshape(N, C, H // self.patch_size, self.patch_size, W // self.patch_size, self.patch_size).permute(0, 2, 4, 1, 3, 5)
+        image_divided = image_divided.reshape(N, self.num_patches, self.patch_dim)
 
+        out = self.proj(image_divided)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -359,7 +404,17 @@ class TransformerEncoderLayer(nn.Module):
         # TODO: Implement the encoder layer by applying self-attention followed    #
         # by a feedforward block. This code will be very similar to decoder layer. #
         ############################################################################
+        shortcut = src
+        src = self.self_attn(src, src, src, src_mask)
+        src = self.dropout_self(src)
+        src = src + shortcut
+        src = self.norm_self(src)
 
+        shortcut = src
+        src = self.ffn(src)
+        src = self.dropout_ffn(src)
+        src = src + shortcut
+        src = self.norm_ffn(src)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
